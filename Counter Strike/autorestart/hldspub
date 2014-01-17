@@ -1,0 +1,157 @@
+#Source Dedicated Server Init Script
+
+# Server options
+TITLE='hldspublic' # Script initialization title
+LONGNAME='Counter-Strike 1.6' # Full title of game type
+NAME='hldspublic' # Server handle for the screen session
+DAEMON='hlds_run' # The server daemon
+UPDATER='/home/jesus/servers/public' # The Steam updater. I recommend keeping it one directory below orangebox for tf2 servers.
+STEAM='/home/jesus/servers/public' # Указываем траекторию, где расположен ваш сервер.
+USER='root' # Указываем вашего пользователя в системе. Нивкоем случае не запускать от root. Так что в примере я указал своего пользователя fieldline.
+# Game options
+IP='192.168.1.11' # Указываем ip сервера.
+PORT='27050' # Указываем нужный порт.
+MAP='de_dust' # Указываем карту при старте сервера.
+GAME='cstrike' # Указываем вид продукта "Game type (tf|cstrike|valve|hl2mp)".
+SIZE='21' # Максимальное количество игроков на сервере. Указал 
+HIGHPRIORITY=1                #Set server renice to -20 will make server take priority over all other applications on server. 1 being on and 0 being off.
+
+# Server options string
+OPTS="-binary ./hlds_i686 -game $GAME -port $PORT +ip $IP -noipx +maxplayers $SIZE -secure -pingboost 3 +heapsize 128000 +map $MAP -master 
+-pidfile 
+$STEAM/$GAME/$NAME.pid"
+# Screen command
+CURRENT_USER=$(/usr/bin/whoami)
+if [ "$CURRENT_USER" = "$USER" ]; then
+    INTERFACE="/usr/bin/screen -A -m -d -S $NAME taskset -c 5"
+  else
+    INTERFACE="sudo -u $USER /usr/bin/screen -A -m -d -S $NAME taskset -c 5"
+fi
+
+
+service_start() {
+
+    # Check if the pid files currently exist
+    if [ -f $STEAM/$GAME/$NAME.pid ] || [ -f $STEAM/$GAME/$NAME-screen.pid ]; then
+        # Pid files allready exist check if the process is still running.
+
+        if [ "$(ps -p `cat $STEAM/$GAME/$NAME.pid` | wc -l)" -gt 1 ]; then
+            # Process is still running.
+            echo -e "Cannot start $TITLE.  Server is already running."
+        #exit 1
+        else
+        # Process exited with out cleaning up pid files.
+            if [ "$(ps -p `cat $STEAM/$GAME/$NAME.pid` | wc -l)" -gt 1 ]; then
+            # Screen is still running.
+            # Get the process ID from the pid file we created earlier
+                kill -9 `cat $STEAM/$GAME/$NAME-screen.pid`
+                echo "Killing process ID $id"
+                echo "Removing $TITLE screen pid file"
+                rm -rf $STEAM/$GAME/$NAME-screen.pid
+break
+            fi
+if [ -f $STEAM/$GAME/$NAME-screen.pid ]; then
+rm -rf $STEAM/$GAME/$NAME-screen.pid
+fi
+
+        # Remove server pid file
+        echo "Removing $TITLE pid file"
+        rm -rf $STEAM/$GAME/$NAME.pid
+        # Wipe all old screen sessions
+        screen -wipe 1> /dev/null 2> /dev/null
+        service_start
+        fi
+    else
+    # Server is not running start the server.
+        if [ -x $STEAM/$DAEMON ]; then
+            echo "Starting $TITLE - $LONGNAME"
+            echo "Server IP: $IP"
+            echo "Server port: $PORT"
+            echo "Server size: $SIZE players"
+            cd $STEAM
+            $INTERFACE $STEAM/$DAEMON $OPTS
+            # Prevent race condition on SMP kernels
+             sleep 1
+            # Find and write current process id of the screen process
+            ps -ef | grep SCREEN | grep "$NAME" | grep -v grep | awk '{ print $2}' > $STEAM/$GAME/$NAME-screen.pid
+            echo "$TITLE screen process ID written to $STEAM/$GAME/$NAME-screen.pid"
+            echo "$TITLE server process ID written to $STEAM/$GAME/$NAME.pid"
+            
+            echo "$TITLE started."
+            # Was having problems with directory permisions due to ftp access making these files unreadable by users other than owner.
+            chmod 666 $STEAM/$GAME/*.pid #1> /dev/null 2> /dev/null
+            # Make any pid files created by different users owned by the set user.
+            chown $USER $STEAM/$GAME/*.pid #1> /dev/null 2> /dev/null
+            sleep 2
+            if [ $HIGHPRIORITY = 1 ]; then
+                renice -20 `cat $STEAM/$GAME/$NAME.pid` >/dev/null 2>&1
+            fi
+        fi
+    fi
+}
+
+service_stop() {
+    if [ -f $STEAM/$GAME/$NAME.pid ] || [ -f $STEAM/$GAME/$NAME-screen.pid ]; then
+        echo "Stopping $TITLE - $LONGNAME."
+        # Get the process ID from the pid file we created earlier
+        for id in `cat $STEAM/$GAME/$NAME-screen.pid`
+            do kill -9 $id
+            echo "Killing process ID $id"
+            echo "Removing $TITLE screen pid file"
+            rm -rf $STEAM/$GAME/$NAME-screen.pid
+            break
+        done
+        # Remove server pid file
+        echo "Removing $TITLE pid file"
+        rm -rf $STEAM/$GAME/$NAME.pid
+        # Wipe all old screen sessions
+        screen -wipe 1> /dev/null 2> /dev/null
+        echo "$TITLE stopped."
+    else
+        echo -e "Cannot stop $TITLE.  Server is not running."
+        #exit 1
+    fi    
+}    
+service_clear() {
+    # Removing all pid files
+    echo "Removing all Service pid files."
+    rm -rf $STEAM/$GAME/*.pid 1> /dev/null 2> /dev/null
+}
+
+service_update() {
+    echo "Stopping and Clearing all Service files."
+    service_stop
+    sleep 2
+    service_clear
+    sleep 2
+    echo "Updating Steam Updater"
+    cd $UPDATER
+    ./steam 1> /dev/null 2> /dev/null
+    echo "Updating Game Files"
+    ./steam -command update -game $GAME -dir . 1> /dev/null 2> /dev/null
+    sleep 2
+    service_start
+}
+
+
+case "$1" in
+    'start')
+        service_start
+        ;;
+    'stop')
+        service_stop
+        ;;
+    'restart')
+        service_stop
+        sleep 1
+        service_start
+        ;;
+    'clear')
+        service_clear
+        ;;
+    'update')
+        service_update
+        ;;
+    *)
+        echo "Usage $0 start|stop|restart|clear|update"
+esac
