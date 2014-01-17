@@ -4,7 +4,8 @@
 from subprocess import call
 import sys
 import time
- 
+import subprocess
+
 source = "/tmp/sync_dir_A/" # обратите внимание на закрывающий слэш
 target = "/tmp/sync_dir_B"
 rsync = "rsync"
